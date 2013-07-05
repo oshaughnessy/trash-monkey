@@ -1,10 +1,10 @@
-# NAME
+## NAME
 
 trash-monkey - delete old messages from a mailbox
 
 
 
-# SYNOPSIS
+## SYNOPSIS
 
 __trash-monkey__ \[--nodelete\] \[--verbose\] _cutoff-date_ _mailbox_ \[ _mailbox_ ... \]
 
@@ -16,7 +16,7 @@ __trash-monkey__ --man
 
 
 
-# DESCRIPTION
+## DESCRIPTION
 
 You specify the cutoff-date and give the name of the mailbox (more than one
 can be named).  The script will lock each box, remove all the messages
@@ -26,15 +26,20 @@ Date::Manip for a list of all possible options.
 
 
 
-# SEE ALSO
-
-
+## SEE ALSO
 
 Date::Manip, Mail::Box, http://perl.overmeer.net/mailbox/
 
 
+## License
 
-# AUTHOR
+This code is licensed under the Perl Artistic License, version 2.0.
+For more information, please see the file Artistic_2.0, which was
+included with this distribution, or
+http://opensource.org/licenses/artistic-license-2.0.php
+
+
+## AUTHOR
 
 Copyright (c) 2003-2013 O'Shaughnessy Evans <shaug-github @ wumpus.org>
 
