@@ -1,0 +1,201 @@
+#!/usr/bin/perl
+
+#
+#  $Id: trash-monkey,v 1.16 2003/12/15 21:40:54 shaug Exp shaug $
+#
+
+=head1 NAME
+
+trash-monkey - delete old messages from a mailbox
+
+
+=head1 SYNOPSIS
+
+B<trash-monkey> [--nodelete] [--verbose] I<cutoff-date> I<mailbox> [ I<mailbox> ... ]
+
+B<trash-monkey> --version
+
+B<trash-monkey> --help
+
+B<trash-monkey> --man
+
+
+=head1 DESCRIPTION
+
+You specify the cutoff-date and give the name of the mailbox (more than one
+can be named).  The script will lock each box, remove all the messages
+older than that, and then unlock it.  The maximum age can be specified
+in many ways:  '24 hours ago', 'yesterday', 'Jan 1 2003', ....  See
+Date::Manip for a list of all possible options.
+
+
+==head1 SEE ALSO
+
+Date::Manip, Mail::Box, http://perl.overmeer.net/mailbox/
+
+
+=head1 AUTHOR
+
+Copyright (c) 2003 O'Shaughnessy Evans <shaug-github @ wumpus.org>
+
+=cut
+
+
+use strict;
+use Getopt::Long;
+use Mail::Box::Manager;
+use Date::Manip qw(ParseDate UnixDate);
+use vars qw($ME $VERSION $Verbose $Usage $Cutoff @Mailboxes %Flags $AnyChanges);
+use constant NOCLEAN => '.notrashclean';
+$AnyChanges = 0;
+
+BEGIN {
+  $VERSION = '0.'. (split(' ', '$Id: trash-monkey,v 1.16 2003/12/15 21:40:54 shaug Exp shaug $'))[2];
+  $ME = 'trash-monkey';
+
+  $Usage = <<EOusage;
+$ME:  delete old messages from mailboxes
+
+Usage:
+  $ME [<opts>] <date or period> <mailbox> [ <mailbox> ... ]
+
+Options:
+  --help        Show this usage text.
+  --man         Show the comprehensive documentation.
+  --nodelete|-n Don't delete any messages; just show what would have been done.
+  --verbose|-v  Show details of progress (give more than once for more info).
+  --version     Show the version ($VERSION).
+
+EOusage
+}
+
+# handle the command-line
+$Verbose = 0;
+GetOptions('verbose|v+' => \$Verbose,
+           'version'    => \$Flags{version},
+           'help|h'     => \$Flags{help},
+           'man|m'      => \$Flags{man},
+           'nodelete|n' => \$Flags{no}
+          )
+ or die($Usage);
+if ($Flags{version}) {
+    print "$ME version $VERSION\n";
+    exit 0;
+}
+elsif ($Flags{help}) {
+    print $Usage;
+    exit 0;
+}
+elsif ($Flags{man}) {
+    use Pod::Usage;
+    pod2usage(-verbose => 2, -exitval => 0);
+}
+
+if ($#ARGV < 1) {
+    print "ERROR:  Sorry, but a cutoff date and mailbox must be given.\n\n".
+          $Usage;
+    exit 1;
+}
+else {
+    ($Cutoff, @Mailboxes) = @ARGV;
+}
+
+Mail::Reporter->defaultTrace('INTERNAL');
+my $mgr = Mail::Box::Manager->new();
+my $cutoff = UnixDate(ParseDate($Cutoff), '%s');
+if ($Verbose >= 2) {
+    print "Now:  ". localtime(time). "\n";
+    print "Cutoff:  ". localtime($cutoff). "\n";
+}
+
+my %stats;
+foreach my $mbx (@Mailboxes) {
+    my $changed = 0;
+
+    # get mailbox file info before we make any changes
+    my @boxbefore = stat($mbx)
+     or print("Couldn't stat $mbx: $!\n"), next;
+
+    # open the mailbox
+    my $box = $mgr->open($mbx, access => 'rw', remove_when_empty => 0)
+     or print("Couldn't open $mbx: $!\n"), next;
+
+    # search the mailbox for messages older than the cutoff, but ignore
+    # special UW-IMAP data messages
+    my @old = grep { $_->get('Subject') !~ '^DON\'T DELETE THIS MESSAGE '
+		     and $_->timestamp < $cutoff
+                   } $box->messages;
+
+    # keep track of whether anything has changed
+    $AnyChanges += @old;
+
+    # track summary stats
+    if ($Verbose) {
+        $stats{$mbx}{old} = scalar @old;
+        $stats{$mbx}{total} = scalar $box->messages;
+        foreach (@old) { $stats{$mbx}{size} += $_->size; }
+        foreach ($box->messages) { $stats{$mbx}{totalsize} += $_->size; }
+    }
+
+    # report what we've found
+    if ($Verbose >= 2) {
+        print "Mailbox $mbx:  too old:  ". scalar @old. "\n";
+        foreach my $msg (@old) {
+            printf "%5d: %-.73s\n", $msg->seqnr, localtime($msg->timestamp).
+                   ", from ".  $msg->get('From');
+        }
+    }
+    if ($Verbose >= 3) {
+        print "Mailbox $mbx:  all:  ". scalar($box->messages). "\n";
+        foreach my $msg ($box->messages) {
+            printf "%5d: %-.73s\n", $msg->seqnr, localtime($msg->timestamp).
+                   ", from ".  $msg->get('From');
+        }
+    }
+
+    # remove the old messages
+    if (not $Flags{no}) {
+        print "Mailbox $box:  removing ". scalar @old. " old messages.\n"
+         if $Verbose >= 3;
+        foreach (@old) { $_->delete; }
+    }
+
+    print "\n" if $Verbose >= 2;
+
+    # close up the mailbox
+    $changed = $box->isModified();
+    $box->close;
+
+    # compare the file stat info from before we made changes with the file
+    # stat info now ($boxafter[4] is the uid of the owner, $boxafter[5] is
+    # the gid)
+    if ($changed) {
+        my @boxafter = stat($mbx) or next;
+        my ($mode1, $uid1, $gid1) = @boxbefore[2,4,5];
+        my ($mode2, $uid2, $gid2) = @boxafter[2,4,5];
+        if ($uid1 != $uid2 or $gid1 != $gid2) {
+            print "Returning $mbx to owner $uid1:$gid1\n" if $Verbose >= 1;
+            chown $uid1, $gid1, $mbx;
+        }
+        if ($mode1 != $mode2) {
+            printf("Returning $mbx to mode %04o\n", $mode1 & 07777)
+             if $Verbose >= 1;
+            chmod $mode1 & 07777, $mbx;
+        }
+    }
+}
+
+if ($Verbose and $AnyChanges) {
+    print "Summary:  removed messages older than $Cutoff (".
+          localtime($cutoff).  ")\n";
+    foreach my $box (@Mailboxes) {
+        next unless exists $stats{$box}{old} && $stats{$box}{old} > 0;
+        print "    $box had ". $stats{$box}{old}. ' of '.
+              $stats{$box}{total}. " messages too old (".
+              (sprintf('%.1f/%.1f kb', $stats{$box}{size} / 1024,
+                                       $stats{$box}{totalsize} / 1024)
+              ). ")\n";
+    }
+}
+
+__END__
