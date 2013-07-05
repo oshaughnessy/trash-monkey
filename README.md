@@ -36,4 +36,6 @@ Date::Manip, Mail::Box, http://perl.overmeer.net/mailbox/
 
 # AUTHOR
 
-Copyright (c) 2003 O'Shaughnessy Evans <shaug-github @ wumpus.org>
+Copyright (c) 2003-2013 O'Shaughnessy Evans <shaug-github @ wumpus.org>
+
+https://github.com/oshaughnessy/trash-monkey
