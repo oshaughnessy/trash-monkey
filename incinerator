@@ -1,0 +1,77 @@
+#!/bin/ksh
+
+##
+# 
+# incinerator:  remove all the old messages from the user mailboxes
+#               "Trash" and "Junk".
+# 
+# Copyright (c) 2003-2013 O'Shaughnessy Evans <shaug-github @ wumpus.org>
+# https://github.com/oshaughnessy/trash-monkey
+##
+
+# How long do we want to keep email?  Anything older will be removed.
+TRASH_AGE='4 days ago'
+JUNK_AGE='1 week ago'
+
+## Diagnostics:
+## set to '-n' to disable trash removal
+## set to '-v' to get verbose output; add -v's to get more info
+#DEBUG_TRASH="-n -v"
+#DEBUG_JUNK="-v -v"
+
+PATH=$PATH:/usr/local/adm/bin
+
+## delete old Trash messages from /usr/mail
+print -u2 "Cleaing out Trash mailboxes...(`date`)"
+locate '/usr/mail/*/Trash' | xargs trash-monkey $DEBUG_TRASH "$TRASH_AGE"
+print -u2 "Done (`date`)."
+print -u2 ""
+
+## reset trash directory permissions
+print -u2 "Checking ownership of Trash mailboxes..."
+awk -F: '$6 ~ /\/home\// { print $1,$3,$4,$6 }' /etc/passwd |
+while read l u g h; do
+    mdir=`echo $h |sed 's,^.*/home,/usr/mail,'`
+    mbox=$mdir/Trash
+    printf "%-80.80s\r" "`ls -lad $mdir`"
+
+    # make sure the trash directory and mailbox exist
+    [[ -d $mdir ]] || mkdir -p $mdir
+    [[ -f $mbox ]] || touch $mbox
+
+    bad=`find $mdir \! -user $u`
+    [[ -z "$bad" ]] && continue
+    ls -lad $bad
+
+    chown -R $u:$g $mdir
+    chmod 0600 $mbox
+    ls -lad $bad
+done
+
+
+## delete old Junk messages from user home directories
+awk -F: '/^[^#]/ && $4 >= 500 { print $6 }' /etc/passwd \
+| while read home; do
+    # skip if there's no Junk file
+    [[ -f $home/mail/Junk ]] || continue
+
+    #has_junk=$(find $home/mail/Junk \! -size 504c)
+    #[[ -n "$has_junk" ]] || continue
+
+    trash-monkey $DEBUG_JUNK "$JUNK_AGE" $home/mail/Junk
+done
+
+print -u2 "Checking ownership of Junk mailboxes..."
+awk -F: '{ print $1,$3,$4,$6 }' /etc/passwd |
+while read l u g h; do
+    mbx=$h/mail/Junk
+    [[ -f $mbx ]] || continue
+
+    bad=`find $mbx \! -user $u`
+    [[ -z "$bad" ]] && continue
+
+    ls -l $bad
+    chown $u:$g $mbx
+    chmod 0600 $mbx
+    ls -l $bad
+done
